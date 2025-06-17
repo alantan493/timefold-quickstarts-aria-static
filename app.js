@@ -1,10 +1,92 @@
 /**
- * app.js - FIXED VRP UI with Fresh Random Seed Integration
+ * app.js - FIXED VRP UI with Fresh Random Seed Integration + Error Handling
  * 
  * PLACE THIS FILE IN: static/app.js
  * 
  * KEY FIX: Uses /route-plans-fresh endpoint for iteration testing to ensure different results
+ * ADDED: Safe initialization with stub functions for missing dependencies
  */
+
+// =============================================================================
+// STUB FUNCTIONS FOR MISSING DEPENDENCIES
+// =============================================================================
+
+// Stub functions if timefold-webui.js doesn't load properly
+if (typeof window.replaceQuickstartTimefoldAutoHeaderFooter === 'undefined') {
+    window.replaceQuickstartTimefoldAutoHeaderFooter = function() {
+        console.log('Using stub: replaceQuickstartTimefoldAutoHeaderFooter');
+        const header = document.getElementById('timefold-auto-header');
+        if (header) {
+            header.innerHTML = `
+                <div class="container-fluid bg-primary text-white p-2">
+                    <h3 class="mb-0">🚛 Vehicle Routing with Timefold Solver</h3>
+                </div>
+            `;
+        }
+        
+        const footer = document.getElementById('timefold-auto-footer');
+        if (footer) {
+            footer.innerHTML = `
+                <div class="container-fluid bg-light p-2 text-center">
+                    <small>Powered by Timefold Solver & GraphHopper</small>
+                </div>
+            `;
+        }
+    };
+}
+
+// Stub for showError function to prevent crashes
+if (typeof window.showError === 'undefined') {
+    window.showError = function(message, xhr) {
+        console.error('Error:', message);
+        
+        // Try to extract meaningful error message
+        let errorDetail = message;
+        if (xhr) {
+            try {
+                if (xhr.responseJSON && xhr.responseJSON.detail) {
+                    errorDetail = xhr.responseJSON.detail;
+                } else if (xhr.responseText) {
+                    errorDetail = xhr.responseText;
+                } else if (xhr.status) {
+                    errorDetail = `HTTP ${xhr.status}: ${message}`;
+                }
+            } catch (e) {
+                console.warn('Could not parse error response:', e);
+            }
+        }
+        
+        // Show error notification
+        const notification = document.createElement('div');
+        notification.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+        notification.style.cssText = 'top: 1rem; right: 1rem; z-index: 1050; max-width: 400px;';
+        notification.innerHTML = `
+            <strong>⚠️ Error:</strong> ${errorDetail}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        const panel = document.getElementById('notificationPanel');
+        if (panel) {
+            panel.appendChild(notification);
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 10000);
+        } else {
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 10000);
+        }
+    };
+}
+
+// =============================================================================
+// MAIN APPLICATION VARIABLES AND STATE
+// =============================================================================
 
 let autoRefreshIntervalId = null;
 let initialized = false;
@@ -97,6 +179,10 @@ const RAINBOW_COLORS = [
     '#8000FF', '#000000', '#FF4080', '#8B4513'
 ];
 
+// =============================================================================
+// ERROR HANDLING FUNCTIONS
+// =============================================================================
+
 function handleCriticalError(context, error, recovery = null) {
     console.error(`CRITICAL ERROR in ${context}:`, error);
     
@@ -108,7 +194,12 @@ function handleCriticalError(context, error, recovery = null) {
         }
     }
     
-    showError(`${context} failed: ${error.message}`, null);
+    if (typeof showError === 'function') {
+        showError(`${context} failed: ${error.message}`, null);
+    } else {
+        console.error('showError function not available');
+        alert(`${context} failed: ${error.message}`);
+    }
 }
 
 function resetButtonState(buttonId, originalText, originalClass = 'btn-primary') {
@@ -119,6 +210,10 @@ function resetButtonState(buttonId, originalText, originalClass = 'btn-primary')
         button.className = `btn ${originalClass}`;
     }
 }
+
+// =============================================================================
+// ITERATIVE TESTING UI AND FUNCTIONALITY
+// =============================================================================
 
 function createIterativeTestingUI() {
     if (document.getElementById('iterative-panel')) {
@@ -818,56 +913,6 @@ function loadIterationVisualization(iterationIndex) {
     alert(`Loaded Iteration ${result.iteration}: ${result.distance}km with ${routeType}${seedInfo} via ${endpointInfo}`);
 }
 
-function renderMarkersAndUI(solution) {
-    try {
-        if (!initialized) {
-            const bounds = [solution.southWestCorner, solution.northEastCorner];
-            map.fitBounds(bounds);
-        }
-
-        vehiclesTable.children().remove();
-        solution.vehicles.forEach(function (vehicle) {
-            const marker = getHomeLocationMarker(vehicle);
-            if (marker) {
-                marker.setPopupContent(homeLocationPopupContent(vehicle));
-            }
-            
-            const {id, capacity, totalDemand, totalDrivingTimeSeconds} = vehicle;
-            const percentage = totalDemand / capacity * 100;
-            const color = colorByVehicle(vehicle);
-            
-            vehiclesTable.append(`
-                <tr>
-                    <td><i class="fas fa-circle" style="color: ${color}; font-size: 1.2rem;"></i></td>
-                    <td>Vehicle ${id}</td>
-                    <td>
-                        <div class="progress" data-bs-toggle="tooltip-load" data-bs-placement="left" 
-                             title="Cargo: ${totalDemand} / Capacity: ${capacity}">
-                            <div class="progress-bar" role="progressbar" 
-                                 style="width: ${percentage}%; background-color: ${color};">
-                                 ${totalDemand}/${capacity}
-                            </div>
-                        </div>
-                    </td>
-                    <td>${formatDrivingTime(totalDrivingTimeSeconds)}</td>
-                </tr>`);
-        });
-
-        solution.visits.forEach(visit => {
-            const marker = getVisitMarker(visit);
-            if (marker) {
-                marker.setPopupContent(visitPopupContent(visit));
-            }
-        });
-        
-        $('#score').text(solution.score);
-        $('#drivingTime').text(formatDrivingTime(solution.totalDrivingTimeSeconds));
-        
-    } catch (error) {
-        handleCriticalError('renderMarkersAndUI', error);
-    }
-}
-
 function completeIterativeTest() {
     const testDuration = (Date.now() - iterativeTestState.timers.testStartTime) / 1000;
     const stats = iterativeTestState.statistics;
@@ -969,8 +1014,9 @@ function updateIterationDisplay(message, progress) {
     }
 }
 
-// Keep all the existing functions for timing, rendering, etc. unchanged
-// Just the iterative testing now uses fresh random seeds
+// =============================================================================
+// TIMING PANEL FUNCTIONS
+// =============================================================================
 
 function createTimingPanel() {
     if (document.getElementById('vrp-timing-panel')) {
@@ -1056,24 +1102,19 @@ function updateTimingDisplay() {
 
 function updatePhaseDisplay(phaseName, endTime, startTime) {
     const timeEl = document.getElementById(`${phaseName}-time`);
-    const statusEl = document.getElementById(`${phaseName}-status`);
     
-    if (!timeEl || !statusEl) return;
+    if (!timeEl) return;
     
     if (endTime && startTime) {
         const duration = ((endTime - startTime) / 1000).toFixed(1);
         timeEl.textContent = `${duration}s`;
-        statusEl.textContent = '✅';
     } else if (vrpTimer.isActive && startTime && !endTime) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         timeEl.textContent = `${elapsed}s`;
-        statusEl.textContent = '🔄';
     } else if (vrpTimer.isActive && !startTime) {
         timeEl.textContent = 'pending';
-        statusEl.textContent = '⏳';
     } else {
         timeEl.textContent = '--';
-        statusEl.textContent = '⏳';
     }
 }
 
@@ -1106,10 +1147,8 @@ function resetTimingDisplay() {
     const phases = ['precomputation', 'optimization', 'visualization'];
     phases.forEach(phase => {
         const timeEl = document.getElementById(`${phase}-time`);
-        const statusEl = document.getElementById(`${phase}-status`);
         
         if (timeEl) timeEl.textContent = '--';
-        if (statusEl) statusEl.textContent = '⏳';
     });
     
     const totalTimeEl = document.getElementById('total-time');
@@ -1189,8 +1228,9 @@ function updateTimingStatus(message) {
     console.log(`📊 Status: ${message}`);
 }
 
-// Keep all your existing rendering and utility functions exactly the same
-// Only the iterative testing has changed to use fresh random seeds
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
 
 function colorByVehicle(vehicle) {
     if (!vehicle) return null;
@@ -1219,6 +1259,10 @@ function visitPopupContent(visit) {
     <h6>Available from ${showTimeOnly(visit.minStartTime)} to ${showTimeOnly(visit.maxEndTime)}.</h6>
     ${arrival}`;
 }
+
+// =============================================================================
+// MAP RENDERING FUNCTIONS
+// =============================================================================
 
 function getHomeLocationMarker(vehicle) {
     try {
@@ -1261,6 +1305,56 @@ function getVisitMarker(visit) {
     } catch (error) {
         console.error('Error creating visit marker:', error);
         return null;
+    }
+}
+
+function renderMarkersAndUI(solution) {
+    try {
+        if (!initialized) {
+            const bounds = [solution.southWestCorner, solution.northEastCorner];
+            map.fitBounds(bounds);
+        }
+
+        vehiclesTable.children().remove();
+        solution.vehicles.forEach(function (vehicle) {
+            const marker = getHomeLocationMarker(vehicle);
+            if (marker) {
+                marker.setPopupContent(homeLocationPopupContent(vehicle));
+            }
+            
+            const {id, capacity, totalDemand, totalDrivingTimeSeconds} = vehicle;
+            const percentage = totalDemand / capacity * 100;
+            const color = colorByVehicle(vehicle);
+            
+            vehiclesTable.append(`
+                <tr>
+                    <td><i class="fas fa-circle" style="color: ${color}; font-size: 1.2rem;"></i></td>
+                    <td>Vehicle ${id}</td>
+                    <td>
+                        <div class="progress" data-bs-toggle="tooltip-load" data-bs-placement="left" 
+                             title="Cargo: ${totalDemand} / Capacity: ${capacity}">
+                            <div class="progress-bar" role="progressbar" 
+                                 style="width: ${percentage}%; background-color: ${color};">
+                                 ${totalDemand}/${capacity}
+                            </div>
+                        </div>
+                    </td>
+                    <td>${formatDrivingTime(totalDrivingTimeSeconds)}</td>
+                </tr>`);
+        });
+
+        solution.visits.forEach(visit => {
+            const marker = getVisitMarker(visit);
+            if (marker) {
+                marker.setPopupContent(visitPopupContent(visit));
+            }
+        });
+        
+        $('#score').text(solution.score);
+        $('#drivingTime').text(formatDrivingTime(solution.totalDrivingTimeSeconds));
+        
+    } catch (error) {
+        handleCriticalError('renderMarkersAndUI', error);
     }
 }
 
@@ -1336,8 +1430,9 @@ function renderGraphHopperRoutes(vehicles) {
     }
 }
 
-// Keep all your existing solve, refresh, and other functions unchanged
-// The key change is just the iterative testing using /route-plans-fresh
+// =============================================================================
+// MAIN VRP SOLVE FUNCTIONS
+// =============================================================================
 
 function solve() {
     try {
@@ -1373,7 +1468,12 @@ function solve() {
             
             refreshSolvingButtons(true);
         }).fail(function (xhr) {
-            showError("Start solving failed.", xhr);
+            if (typeof showError === 'function') {
+                showError("Start solving failed.", xhr);
+            } else {
+                console.error("Start solving failed:", xhr);
+                alert("Start solving failed. Check console for details.");
+            }
             refreshSolvingButtons(false);
             if (!iterativeTestState.running) {
                 vrpTimer.isActive = false;
@@ -1394,39 +1494,392 @@ function solve() {
     }
 }
 
-// Keep all your other existing functions unchanged...
-// The rest of your app.js remains the same, just initialize with:
+function refreshSolvingButtons(solving) {
+    if (solving) {
+        solveButton.hide();
+        stopSolvingButton.show();
+        $("#showRealRoads").hide();
+        $("#osrmRoutesButton").hide();
+        $("#toggleRoutesVisibility").hide();
+    } else {
+        solveButton.show();
+        stopSolvingButton.hide();
+        if (scheduleId) {
+            $("#showRealRoads").show();
+            $("#toggleRoutesVisibility").show();
+        }
+    }
+}
+
+function stopSolving() {
+    console.log('🛑 Stopping solve process...');
+    $.delete("/route-plans/" + scheduleId)
+        .done(function () {
+            console.log('✅ Solve stopped successfully');
+            refreshSolvingButtons(false);
+            if (!iterativeTestState.running) {
+                vrpTimer.isActive = false;
+                autoVisualizationActive = false;
+                stopTimingUpdates();
+                updateTimingStatus('🛑 Solve stopped by user');
+            }
+        })
+        .fail(function (xhr) {
+            if (typeof showError === 'function') {
+                showError("Stop solving failed.", xhr);
+            } else {
+                console.error("Stop solving failed:", xhr);
+                alert("Stop solving failed. Check console for details.");
+            }
+        });
+}
+
+function analyze() {
+    console.log('📊 Starting score analysis...');
+    if (loadedRoutePlan == null) {
+        const notification = document.createElement('div');
+        notification.className = 'alert alert-warning alert-dismissible fade show position-fixed';
+        notification.style.cssText = 'top: 1rem; right: 1rem; z-index: 1050;';
+        notification.innerHTML = `
+            <strong>No solution loaded!</strong> Please solve first, then analyze.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 5000);
+        return;
+    }
+    
+    $('#scoreAnalysisScoreLabel').text(`(${loadedRoutePlan.score})`);
+    
+    try {
+        if (typeof refreshScoreDirector === 'function') {
+            refreshScoreDirector(loadedRoutePlan);
+        } else {
+            console.warn('refreshScoreDirector function not available');
+            $('#scoreAnalysisModalContent').html(`
+                <div class="alert alert-info">
+                    <h5>📊 Solution Analysis</h5>
+                    <p><strong>Score:</strong> ${loadedRoutePlan.score}</p>
+                    <p><strong>Total Driving Time:</strong> ${formatDrivingTime(loadedRoutePlan.totalDrivingTimeSeconds)}</p>
+                    <p><strong>Vehicles:</strong> ${loadedRoutePlan.vehicles.length}</p>
+                    <p><strong>Visits:</strong> ${loadedRoutePlan.visits.length}</p>
+                    <p><em>Detailed score analysis not available (score-analysis.js not loaded)</em></p>
+                </div>
+            `);
+        }
+    } catch (error) {
+        console.error('Error in score analysis:', error);
+        $('#scoreAnalysisModalContent').html(`
+            <div class="alert alert-warning">
+                <h5>⚠️ Analysis Error</h5>
+                <p>Could not perform detailed score analysis: ${error.message}</p>
+                <p><strong>Basic Info:</strong></p>
+                <ul>
+                    <li>Score: ${loadedRoutePlan.score}</li>
+                    <li>Total Driving Time: ${formatDrivingTime(loadedRoutePlan.totalDrivingTimeSeconds)}</li>
+                    <li>Vehicles: ${loadedRoutePlan.vehicles.length}</li>
+                    <li>Visits: ${loadedRoutePlan.visits.length}</li>
+                </ul>
+            </div>
+        `);
+    }
+    
+    const modal = new bootstrap.Modal(document.getElementById('scoreAnalysisModal'));
+    modal.show();
+}
+
+// =============================================================================
+// ADDITIONAL FUNCTIONS (timeline, refresh, etc.)
+// =============================================================================
+
+function renderTimelines(solution) {
+    try {
+        if (typeof vis === 'undefined') {
+            console.warn('vis.js not loaded - skipping timeline rendering');
+            return;
+        }
+        
+        // Clear existing timeline data
+        byVehicleGroupData.clear();
+        byVehicleItemData.clear();
+        byVisitGroupData.clear();
+        byVisitItemData.clear();
+        
+        // Render vehicle timeline
+        solution.vehicles.forEach(vehicle => {
+            byVehicleGroupData.add({
+                id: vehicle.id,
+                content: `Vehicle ${vehicle.id}`,
+                style: `color: ${colorByVehicle(vehicle)};`
+            });
+        });
+        
+        // Render visit timeline
+        solution.visits.forEach(visit => {
+            byVisitGroupData.add({
+                id: visit.id,
+                content: visit.name
+            });
+            
+            if (visit.arrivalTime) {
+                byVisitItemData.add({
+                    id: visit.id,
+                    group: visit.id,
+                    content: visit.name,
+                    start: JSJoda.LocalDateTime.parse(visit.arrivalTime).toString(),
+                    end: JSJoda.LocalDateTime.parse(visit.arrivalTime).toString()
+                });
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error rendering timelines:', error);
+    }
+}
+
+function refresh() {
+    if (scheduleId) {
+        console.log('🔄 Refreshing route plan data...');
+        
+        $.getJSON(`/route-plans/${scheduleId}`)
+            .done(function(routePlan) {
+                const isStillSolving = routePlan.solverStatus != null && routePlan.solverStatus !== "NOT_SOLVING";
+                refreshSolvingButtons(isStillSolving);
+                
+                if (!isStillSolving && !iterativeTestState.running) {
+                    markOptimizationEnd();
+                }
+                
+                loadedRoutePlan = routePlan;
+                renderMarkersAndUI(routePlan);
+                renderTimelines(routePlan);
+                
+                if (!autoVisualizationActive && !isStillSolving && !iterativeTestState.running) {
+                    console.log('🗺️ Auto-loading GraphHopper visualization...');
+                    showGraphHopperRoutes();
+                }
+                
+                console.log(`✅ Refreshed route plan (solving: ${isStillSolving})`);
+            })
+            .fail(function(xhr) {
+                if (typeof showError === 'function') {
+                    showError("Refresh failed.", xhr);
+                } else {
+                    console.error("Refresh failed:", xhr);
+                }
+            });
+    }
+}
+
+function fetchDemoData() {
+    console.log('📊 Fetching demo data...');
+    
+    const targetDemoId = demoDataId || 'SINGAPORE_WIDE';
+    
+    $.getJSON(`/demo-data/${targetDemoId}`)
+        .done(function(routePlan) {
+            demoDataId = targetDemoId;
+            scheduleId = null;
+            loadedRoutePlan = routePlan;
+            
+            console.log(`✅ Loaded demo data: ${targetDemoId}`);
+            
+            renderMarkersAndUI(routePlan);
+            renderTimelines(routePlan);
+            refreshSolvingButtons(false);
+            initialized = true;
+            
+            if (!iterativeTestState.running) {
+                updateTimingStatus('📊 Demo data loaded. Ready to solve...');
+            }
+        })
+        .fail(function(xhr) {
+            console.error('Failed to load demo data:', xhr);
+            if (typeof showError === 'function') {
+                showError("Failed to load demo data.", xhr);
+            } else {
+                alert("Failed to load demo data. Check console for details.");
+            }
+        });
+}
+
+function setupAjax() {
+    // Set up auto-refresh
+    if (autoRefreshIntervalId != null) {
+        clearInterval(autoRefreshIntervalId);
+    }
+    autoRefreshIntervalId = setInterval(refresh, 2000);
+    
+    // Set up jQuery AJAX defaults
+    $.ajaxSetup({
+        contentType: "application/json"
+    });
+    
+    // Add custom HTTP methods
+    $.extend({
+        delete: function(url, data, callback, type) {
+            if ($.isFunction(data)) {
+                type = type || callback;
+                callback = data;
+                data = undefined;
+            }
+            return $.ajax({
+                url: url,
+                type: 'DELETE',
+                data: data,
+                success: callback,
+                dataType: type
+            });
+        }
+    });
+}
+
+function showGraphHopperRoutes() {
+    if (!scheduleId) {
+        alert('No route plan loaded. Please solve first.');
+        return;
+    }
+    
+    console.log('🗺️ Loading GraphHopper routes...');
+    $("#showRealRoads").prop("disabled", true).text("Loading...");
+    
+    $.getJSON(`/route-visualization/${scheduleId}`)
+        .done(function(graphHopperData) {
+            console.log('✅ GraphHopper data received:', graphHopperData);
+            
+            if (graphHopperData && graphHopperData.vehicles) {
+                routeGroup.clearLayers();
+                renderGraphHopperRoutes(graphHopperData.vehicles);
+                autoVisualizationActive = true;
+                
+                if (!iterativeTestState.running) {
+                    markVisualizationEnd();
+                }
+                
+                $("#showRealRoads").hide();
+                $("#toggleRoutesVisibility").show();
+                
+                console.log('✅ GraphHopper routes rendered successfully');
+            } else {
+                throw new Error('Invalid GraphHopper response format');
+            }
+        })
+        .fail(function(xhr) {
+            console.error('GraphHopper visualization failed:', xhr);
+            
+            renderStraightLineRoutes(loadedRoutePlan);
+            autoVisualizationActive = false;
+            
+            if (!iterativeTestState.running) {
+                markVisualizationEnd();
+            }
+            
+            if (typeof showError === 'function') {
+                showError("Failed to load GraphHopper routes. Showing straight lines instead.", xhr);
+            } else {
+                alert("Failed to load GraphHopper routes. Showing straight lines instead.");
+            }
+        })
+        .always(function() {
+            $("#showRealRoads").prop("disabled", false).text("Show Real Roads");
+        });
+}
+
+function toggleRoutesVisibility() {
+    if (routesVisible) {
+        routeGroup.clearLayers();
+        routesVisible = false;
+        $("#toggleRoutesVisibility").html('<i class="fas fa-eye"></i> Show Routes');
+    } else {
+        if (autoVisualizationActive && scheduleId) {
+            showGraphHopperRoutes();
+        } else {
+            renderStraightLineRoutes(loadedRoutePlan);
+        }
+        routesVisible = true;
+        $("#toggleRoutesVisibility").html('<i class="fas fa-eye-slash"></i> Hide Routes');
+    }
+}
+
+function openRecommendationModal(lat, lng) {
+    // This function would handle adding new visits - stub for now
+    console.log(`Opening recommendation modal for coordinates: ${lat}, ${lng}`);
+}
+
+// =============================================================================
+// SAFE INITIALIZATION
+// =============================================================================
 
 $(document).ready(function () {
     try {
-        replaceQuickstartTimefoldAutoHeaderFooter();
+        // Check if required functions exist before calling them
+        if (typeof replaceQuickstartTimefoldAutoHeaderFooter === 'function') {
+            replaceQuickstartTimefoldAutoHeaderFooter();
+        } else {
+            console.warn('replaceQuickstartTimefoldAutoHeaderFooter not found - creating basic header');
+            // Create a basic header if the function is missing
+            const header = document.getElementById('timefold-auto-header');
+            if (header) {
+                header.innerHTML = `
+                    <div class="container-fluid bg-primary text-white p-2">
+                        <h3 class="mb-0">🚛 Vehicle Routing with Timefold Solver + GraphHopper</h3>
+                    </div>
+                `;
+            }
+            
+            const footer = document.getElementById('timefold-auto-footer');
+            if (footer) {
+                footer.innerHTML = `
+                    <div class="container-fluid bg-light p-2 text-center">
+                        <small>Powered by Timefold Solver & GraphHopper | Fresh Random Seeds via /route-plans-fresh</small>
+                    </div>
+                `;
+            }
+        }
         
+        // Initialize Leaflet map
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
         }).addTo(map);
 
+        // Set up button event handlers
         solveButton.click(solve);
         stopSolvingButton.click(stopSolving);
         analyzeButton.click(analyze);
         refreshSolvingButtons(false);
 
-        $("#byVehicleTab").on('shown.bs.tab', () => byVehicleTimeline.redraw());
-        $("#byVisitTab").on('shown.bs.tab', () => byVisitTimeline.redraw());
+        // Set up tab event handlers
+        $("#byVehicleTab").on('shown.bs.tab', () => {
+            if (typeof byVehicleTimeline !== 'undefined' && byVehicleTimeline.redraw) {
+                byVehicleTimeline.redraw();
+            }
+        });
+        $("#byVisitTab").on('shown.bs.tab', () => {
+            if (typeof byVisitTimeline !== 'undefined' && byVisitTimeline.redraw) {
+                byVisitTimeline.redraw();
+            }
+        });
         
+        // Set up map click handler
         map.on('click', function (e) {
             visitMarker = L.circleMarker(e.latlng, {color: 'green'});
             visitMarker.addTo(map);
             openRecommendationModal(e.latlng.lat, e.latlng.lng);
         });
         
+        // Set up modal handler
         $("#newVisitModal").on("hidden.bs.modal", () => {
             if (visitMarker) map.removeLayer(visitMarker);
         });
 
+        // Set up AJAX with error handling
         setupAjax();
+        
+        // Load demo data
         fetchDemoData();
         
+        // Initialize UI components with delay to ensure DOM is ready
         setTimeout(() => {
             createTimingPanel();
             createIterativeTestingUI(); // FIXED version with /route-plans-fresh
@@ -1437,11 +1890,25 @@ $(document).ready(function () {
         console.log('✅ FIXED VRP application with fresh random seed iterative testing initialized successfully');
         
     } catch (error) {
-        handleCriticalError('Application initialization', error);
+        console.error('❌ Application initialization failed:', error);
+        
+        // Show user-friendly error message
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'alert alert-danger m-3';
+        errorDiv.innerHTML = `
+            <h4>⚠️ Application Error</h4>
+            <p><strong>The application failed to initialize:</strong> ${error.message}</p>
+            <p>This might be due to missing dependencies. Please check:</p>
+            <ul>
+                <li>All script files are loading correctly</li>
+                <li>Your server is serving static files properly</li>
+                <li>Browser console for additional errors</li>
+            </ul>
+            <button class="btn btn-primary" onclick="location.reload()">🔄 Reload Page</button>
+        `;
+        
+        document.body.insertBefore(errorDiv, document.body.firstChild);
     }
 });
 
-// Keep all your other existing functions exactly as they are...
-// (setupAjax, fetchDemoData, refreshSolvingButtons, etc.)
-
-console.log('✅ FIXED VRP Application with Fresh Random Seed Support (/route-plans-fresh) loaded successfully');
+console.log('✅ FIXED VRP Application with Fresh Random Seed Support (/route-plans-fresh) and Error Handling loaded successfully');
